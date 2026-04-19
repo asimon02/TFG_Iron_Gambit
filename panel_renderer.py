@@ -1,12 +1,12 @@
 """
-panel_renderer.py — Dibuja el panel lateral de informacion
+panel_renderer.py -- Dibuja el panel lateral de informacion
 
 Secciones:
   - Titulo "IRON GAMBIT" y subtitulo
   - Estado de la partida y mensaje de turno
   - Indicador de color de turno
   - Piezas capturadas
-  - Historial de movimientos
+  - Historial de movimientos con scrollbar
   - Controles de teclado
 """
 
@@ -31,16 +31,23 @@ class PanelRenderer:
     # Inicializa con la superficie de dibujo, las fuentes y el layout
     def __init__(self, surface: pygame.Surface,
                  fonts: FontManager, layout: Layout):
-        self.surface = surface
-        self.fonts   = fonts
-        self.layout  = layout
+        self.surface        = surface
+        self.fonts          = fonts
+        self.layout         = layout
+        self._scroll_offset = 0
 
-    #  Actualiza el layout y las fuentes
+    # Actualiza el layout y las fuentes
     def update_layout(self, layout: Layout, fonts: FontManager):
         self.layout = layout
         self.fonts  = fonts
 
-    # ── Dibujo principal ──────────────────────────────────────────────────────
+    # -- Scroll ---------------------------------------------------------------
+
+    # Desplaza el historial (delta > 0 = subir hacia jugadas antiguas)
+    def handle_scroll(self, delta: int):
+        self._scroll_offset = max(0, self._scroll_offset + delta)
+
+    # -- Dibujo principal -----------------------------------------------------
 
     # Dibuja todas las secciones del panel en orden
     def draw(self, gs: GameState):
@@ -67,14 +74,14 @@ class PanelRenderer:
         y = self._divider(px, y, pw) + 5
 
         # El historial ocupa el espacio restante hasta los controles
-        controls_h = self._controls_height()
+        controls_h  = self._controls_height()
         hist_bottom = L.py + L.ph - controls_h - 10
         self._draw_history(px, y, pw, hist_bottom, gs)
 
         self._divider(px, hist_bottom, pw)
         self._draw_controls(px, hist_bottom + 7, pw)
 
-    # ── Secciones ─────────────────────────────────────────────────────────────
+    # -- Secciones ------------------------------------------------------------
 
     # Dibuja el titulo del juego con estilo y el subtitulo debajo
     def _draw_title(self, x: int, y: int, w: int) -> int:
@@ -124,8 +131,8 @@ class PanelRenderer:
         self._section_header(x, y, "CAPTURADAS")
         y += f.heading.get_height() + 5
 
-        # Tamaño de cada miniatura: proporcional al panel pero pequeño
-        icon_sz = max(14, min(22, w // 10))
+        # Tamaño de cada miniatura: proporcional al panel pero pequeno
+        icon_sz    = max(14, min(22, w // 10))
         piece_font = pygame.font.SysFont("Segoe UI Symbol", icon_sz)
 
         for label, caps, piece_col, shadow_col in [
@@ -143,7 +150,7 @@ class PanelRenderer:
                 continue
 
             # Dibuja cada pieza capturada como miniatura con sombra
-            cx  = x
+            cx    = x
             row_h = icon_sz + 2
             for sym in caps:
                 glyph = Theme.PIECES.get(sym, sym)
@@ -162,30 +169,165 @@ class PanelRenderer:
 
         return y
 
-    # Dibuja el historial de movimientos en formato SAN
+    # -- Iconos en la notacion SAN --------------------------------------------
+
+    # Sustituye la letra de pieza de un movimiento SAN por su icono unicode
+    def _san_to_icon(self, san: str, is_white: bool) -> tuple[str, str]:
+        """
+        Devuelve (icon, rest) donde icon es el simbolo unicode de la pieza
+        (o '' para un peon) y rest es el resto del movimiento sin la letra.
+
+        Ejemplos:
+          'Nf3'  -> ('♞', 'f3')
+          'Bxe5' -> ('♝', 'xe5')
+          'e4'   -> ('',  'e4')   peon, sin icono de pieza
+          'O-O'  -> ('',  'O-O')  enroque
+        """
+        PIECE_ICONS = {
+            'N': '\u265e', 'B': '\u265d', 'R': '\u265c', 'Q': '\u265b', 'K': '\u265a',
+        }
+        if san and san[0] in PIECE_ICONS:
+            return PIECE_ICONS[san[0]], san[1:]
+        return '', san
+
+    # -- Celda de movimiento (icono + texto) ----------------------------------
+
+    # Dibuja una celda individual del historial con icono + texto
+    def _draw_move_cell(self, san: str, is_white: bool,
+                        cx: int, cy: int, col_w: int, row_h: int,
+                        highlight: bool):
+        f = self.fonts
+
+        if not san:
+            return
+
+        icon, rest = self._san_to_icon(san, is_white)
+
+        # Colores de texto segun bando y estado de resaltado
+        if highlight:
+            text_col = Theme.GOLD_LT
+            icon_col = Theme.GOLD_LT
+        else:
+            text_col = Theme.TEXT
+            icon_col = (Theme.PIECE_WHITE if is_white else (180, 180, 180))
+
+        pad    = 4
+        draw_x = cx + pad
+        draw_y = cy + (row_h - f.hist_move.get_height()) // 2
+
+        # Icono de pieza (fuente simbolo, ligeramente mas pequeno)
+        if icon:
+            icon_surf = f.hist_icon.render(icon, True, icon_col)
+            icon_y    = cy + (row_h - icon_surf.get_height()) // 2
+            self.surface.blit(icon_surf, (draw_x, icon_y))
+            draw_x += icon_surf.get_width() + 1
+
+        # Texto del movimiento (coordenadas + capturas + jaques)
+        move_surf = f.hist_move.render(rest, True, text_col)
+        self.surface.blit(move_surf, (draw_x, draw_y))
+
+    # -- Tabla de historial ---------------------------------------------------
+
+    # Dibuja el historial de movimientos como tabla de tres columnas:
+    #   #  |  blancas  |  negras
+    # Sin cabecera, filas grises alternas, scrollbar lateral y
+    # acento carmesi en el ultimo movimiento jugado.
     def _draw_history(self, x: int, y: int, w: int,
                       bottom: int, gs: GameState) -> int:
-        f = self.fonts
+        f    = self.fonts
+        sans = gs.san_history
+
         self._section_header(x, y, "HISTORIAL")
         y += f.heading.get_height() + 5
 
-        row_h   = f.mono.get_height() + 3
-        space   = bottom - y
-        max_vis = max(2, (space // row_h // 2) * 2)
+        # -- Dimensiones -------------------------------------------------------
+        SB_W   = 5
+        SB_GAP = 3
+        tbl_w  = w - SB_W - SB_GAP
+        NUM_W  = max(22, f.hist_move.size("99.")[0] + 4)
+        COL_W  = (tbl_w - NUM_W - 4) // 2
+        ROW_H  = f.hist_move.get_height() + 5
+        area_h = bottom - y
+        max_vis = max(1, area_h // ROW_H)
 
-        sans    = gs.san_history
-        start   = max(0, len(sans) - max_vis)
-        visible = sans[start:]
+        total_pairs = (len(sans) + 1) // 2
 
-        for i in range(0, len(visible), 2):
-            num   = (start + i) // 2 + 1
-            w_san = visible[i]
-            b_san = visible[i + 1] if i + 1 < len(visible) else ""
-            row   = "{:>3}. {:<8} {}".format(num, w_san, b_san)
-            col   = Theme.GOLD_LT if (i + start >= len(sans) - 2) else Theme.TEXT
-            self.surface.blit(f.mono.render(row, True, col), (x, y))
-            y += row_h
-        return y
+        # Ajustar scroll al rango valido
+        max_scroll = max(0, total_pairs - max_vis)
+        scroll = max(0, min(self._scroll_offset, max_scroll))
+        self._scroll_offset = scroll
+
+        # Primer par visible en funcion del scroll
+        first_pair = max(0, total_pairs - max_vis - scroll)
+        rows_drawn = min(max_vis, total_pairs - first_pair)
+
+        # -- Separadores verticales -------------------------------------------
+        div_x1  = x + NUM_W + 2
+        div_x2  = div_x1 + COL_W + 2
+        table_h = rows_drawn * ROW_H
+
+        if rows_drawn > 0:
+            pygame.draw.line(self.surface, Theme.CRIMSON_DIM,
+                             (div_x1, y), (div_x1, y + table_h), 1)
+            pygame.draw.line(self.surface, Theme.CRIMSON_DIM,
+                             (div_x2, y), (div_x2, y + table_h), 1)
+
+        # -- Filas ------------------------------------------------------------
+        last_idx = len(sans) - 1
+
+        for pair_offset in range(rows_drawn):
+            pair_num = first_pair + pair_offset
+            idx_w    = pair_num * 2
+            idx_b    = idx_w + 1
+            ry       = y + pair_offset * ROW_H
+
+            # Fondo alterno en grises neutros
+            row_bg = (48, 48, 53) if pair_num % 2 == 0 else (40, 40, 45)
+            pygame.draw.rect(self.surface, row_bg, (x, ry, tbl_w, ROW_H))
+
+            # Acento izquierdo en la fila del ultimo movimiento
+            if last_idx in (idx_w, idx_b):
+                pygame.draw.rect(self.surface, Theme.CRIMSON_LT,
+                                 (x, ry, 2, ROW_H))
+
+            # Numero de jugada
+            num_str  = f"{pair_num + 1}."
+            num_surf = f.hist_move.render(num_str, True, Theme.STEEL_LT)
+            self.surface.blit(num_surf,
+                              (x + NUM_W - num_surf.get_width() - 2,
+                               ry + (ROW_H - num_surf.get_height()) // 2))
+
+            # Celda blancas
+            if idx_w < len(sans):
+                hl = (idx_w == last_idx)
+                self._draw_move_cell(sans[idx_w], True,
+                                     div_x1 + 2, ry, COL_W - 4, ROW_H, hl)
+
+            # Celda negras
+            if idx_b < len(sans):
+                hl = (idx_b == last_idx)
+                self._draw_move_cell(sans[idx_b], False,
+                                     div_x2 + 2, ry, COL_W - 4, ROW_H, hl)
+
+        # -- Scrollbar --------------------------------------------------------
+        sb_x = x + tbl_w + SB_GAP
+        sb_y = y
+        sb_h = area_h
+
+        # Pista de la scrollbar
+        pygame.draw.rect(self.surface, (35, 35, 40),
+                         (sb_x, sb_y, SB_W, sb_h), border_radius=3)
+
+        if total_pairs > max_vis:
+            # Thumb proporcional al contenido visible
+            thumb_h    = max(14, int(sb_h * max_vis / total_pairs))
+            # scroll=0 -> thumb abajo; scroll=max -> thumb arriba
+            scroll_ratio = scroll / max_scroll if max_scroll > 0 else 0
+            thumb_y    = sb_y + int((sb_h - thumb_h) * (1.0 - scroll_ratio))
+            pygame.draw.rect(self.surface, Theme.STEEL,
+                             (sb_x, thumb_y, SB_W, thumb_h), border_radius=3)
+
+        return y + table_h
 
     # Dibuja los controles de teclado con su descripcion, en recuadros rojos para destacarlos
     def _draw_controls(self, x: int, y: int, w: int):
@@ -208,7 +350,7 @@ class PanelRenderer:
             self.surface.blit(ds, (x + kw + 7, y + (kh - ds.get_height()) // 2))
             y += kh + 5
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+    # -- Helpers --------------------------------------------------------------
 
     # Calcula la altura total que ocupan los controles para reservar espacio en el historial
     def _controls_height(self) -> int:
@@ -217,7 +359,7 @@ class PanelRenderer:
 
     # Dibuja un encabezado de seccion con una linea debajo para separarlo visualmente
     def _section_header(self, x: int, y: int, text: str):
-        s = self.fonts.heading.render(text, True, Theme.CRIMSON_LT)
+        s  = self.fonts.heading.render(text, True, Theme.CRIMSON_LT)
         self.surface.blit(s, (x, y))
         uy = y + s.get_height() + 1
         pygame.draw.line(self.surface, Theme.GOLD, (x, uy), (x + s.get_width(), uy), 2)

@@ -1,5 +1,5 @@
 """
-game_state.py — Logica de ajedrez pura, sin dependencia de pygame
+game_state.py -- Logica de ajedrez pura, sin dependencia de pygame
 
 Gestiona el tablero, el historial, la seleccion de piezas, los movimientos
 legales, la promocion de peones y la deteccion del fin de partida
@@ -16,13 +16,13 @@ class GameState:
 
     Atributos publicos
     ------------------
-    board              : chess.Board  — posicion actual
-    san_history        : list[str]    — movimientos en notacion SAN
-    selected_sq        : chess.Square — casilla seleccionada (o None)
-    legal_moves        : list[Move]   — movimientos legales desde selected_sq
-    flipped            : bool         — tablero girado (negras abajo)
-    promotion_pending  : chess.Move   — movimiento pendiente de promocion
-    status             : str          — mensaje de estado para la UI
+    board              : chess.Board  -- posicion actual
+    san_history        : list[str]    -- movimientos en notacion SAN
+    selected_sq        : chess.Square -- casilla seleccionada (o None)
+    legal_moves        : list[Move]   -- movimientos legales desde selected_sq
+    flipped            : bool         -- tablero girado (negras abajo)
+    promotion_pending  : chess.Move   -- movimiento pendiente de promocion
+    status             : str          -- mensaje de estado para la UI
     game_over          : bool
     game_over_msg      : str
     """
@@ -39,8 +39,9 @@ class GameState:
         self.status             = "Turno de las Blancas"
         self.game_over          = False
         self.game_over_msg      = ""
+        self.checkmate_winner   = None
 
-    # ── API publica ───────────────────────────────────────────────────────────
+    # -- API publica ----------------------------------------------------------
 
     def reset(self):
         self.__init__()
@@ -90,6 +91,13 @@ class GameState:
         self.promotion_pending = None
         self._execute(move)
 
+    # Ejecuta un movimiento del motor directamente (sin seleccion ni validacion de UI)
+    def apply_engine_move(self, move):
+        if self.game_over or self.promotion_pending:
+            return
+        if move in self.board.legal_moves:
+            self._execute(move)
+
     # Deshace el ultimo movimiento, restaurando el estado anterior
     def undo(self):
         if not self._fen_history or self.game_over:
@@ -100,7 +108,7 @@ class GameState:
         self.game_over = False
         self._refresh()
 
-    # ── Propiedades de conveniencia ───────────────────────────────────────────
+    # -- Propiedades de conveniencia ------------------------------------------
 
     # Ultimo movimiento en formato SAN, o None si no hay movimientos
     @property
@@ -121,7 +129,7 @@ class GameState:
             tmp.push(mv)
         return by_white, by_black
 
-    # ── Internos ──────────────────────────────────────────────────────────────
+    # -- Internos -------------------------------------------------------------
 
     # Selecciona una casilla y calcula los movimientos legales desde ella
     def _select(self, sq: chess.Square):
@@ -167,6 +175,7 @@ class GameState:
         b = self.board
         if b.is_checkmate():
             w = "Blancas" if b.turn == chess.BLACK else "Negras"
+            self.checkmate_winner = chess.BLACK if b.turn == chess.WHITE else chess.WHITE
             self._end("Jaque Mate! Ganan las " + w)
         elif b.is_stalemate():
             self._end("Tablas - Ahogado")
@@ -180,7 +189,7 @@ class GameState:
         self.game_over     = True
         self.game_over_msg = msg
         self.status        = msg
-    
+
     # Calcula la ventaja material actual, sumando el valor de las piezas de cada bando
     def material_advantage(self) -> float:
         VALUES = {

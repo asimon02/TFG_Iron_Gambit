@@ -1,5 +1,5 @@
 """
-modal_renderer.py — Dialogos flotantes sobre la pantalla
+modal_renderer.py -- Dialogos flotantes sobre la pantalla
 
 Modales disponibles:
   - draw_promotion : selector de pieza de promocion
@@ -17,8 +17,8 @@ class ModalRenderer:
     """
     Dibuja los modales flotantes que aparecen sobre el tablero y el panel.
 
-    Cada método devuelve o dibuja sobre la superficie actual con un overlay
-    semitransparente para centrar la atención del usuario.
+    Cada metodo devuelve o dibuja sobre la superficie actual con un overlay
+    semitransparente para centrar la atencion del usuario.
     """
 
     # Inicializa el renderer con la superficie, fuentes y layout actuales
@@ -33,9 +33,9 @@ class ModalRenderer:
         self.layout = layout
         self.fonts  = fonts
 
-    # ── Seleccion de promocion ────────────────────────────────────────────────
+    # -- Seleccion de promocion -----------------------------------------------
 
-    # Dibuja el modal de promocion y devuelve una lista de tuplas (rect, pieza) para detectar clicks
+    # Dibuja el modal de promocion y devuelve una lista de tuplas (rect, pieza)
     def draw_promotion(self, turn_color, mouse_pos: tuple = None) -> list:
         W, H       = self.surface.get_size()
         f          = self.fonts
@@ -50,7 +50,7 @@ class ModalRenderer:
         self._overlay(W, H, 195)
         self._draw_box(bx, by, bw, bh)
 
-        ttl = f.heading.render("PROMOCION ─ Elige pieza", True, Theme.GOLD_LT)
+        ttl = f.heading.render("PROMOCION -- Elige pieza", True, Theme.GOLD_LT)
         self.surface.blit(ttl, (bx + (bw - ttl.get_width()) // 2, by + 8))
 
         pieces  = [chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT]
@@ -99,10 +99,10 @@ class ModalRenderer:
 
         return rects
 
-    # ── Fin de partida ────────────────────────────────────────────────────────
+    # -- Fin de partida -------------------------------------------------------
 
     # Dibuja el modal de fin de partida con el mensaje dado
-    def draw_game_over(self, msg: str):
+    def draw_game_over(self, msg: str) -> pygame.Rect:
         W, H = self.surface.get_size()
         f    = self.fonts
 
@@ -114,18 +114,33 @@ class ModalRenderer:
         self._overlay(W, H, 185)
         self._draw_box(bx, by, bw, bh)
 
+        # Boton de cierre X en la esquina superior derecha
+        close_sz = 20
+        close_r  = pygame.Rect(bx + bw - close_sz - 6, by + 6, close_sz, close_sz)
+        mx, my   = pygame.mouse.get_pos()
+        hovered  = close_r.collidepoint(mx, my)
+        pygame.draw.rect(self.surface,
+                         Theme.CRIMSON_LT if hovered else Theme.CRIMSON_DIM,
+                         close_r, border_radius=4)
+        xf = pygame.font.SysFont("Tahoma", 13, bold=True)
+        xs = xf.render("X", True, Theme.TEXT)
+        self.surface.blit(xs, (close_r.x + (close_sz - xs.get_width()) // 2,
+                               close_r.y + (close_sz - xs.get_height()) // 2))
+
         t1 = f.title.render("FIN DE PARTIDA", True, Theme.GOLD_LT)
         self.surface.blit(t1, (bx + (bw - t1.get_width()) // 2, by + 14))
 
-        t2 = f.body.render(msg, True, Theme.TEXT_BRIGHT)
+        t2 = f.body.render(msg, True, Theme.TEXT)
         self.surface.blit(t2, (bx + (bw - t2.get_width()) // 2,
                                 by + 18 + t1.get_height()))
 
-        t3 = f.small.render("Pulsa N para nueva partida", True, Theme.TEXT_DIM)
+        t3 = f.small.render("Pulsa N para nueva partida", True, Theme.STEEL_LT)
         self.surface.blit(t3, (bx + (bw - t3.get_width()) // 2,
                                 by + bh - t3.get_height() - 14))
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+        return close_r
+
+    # -- Helpers --------------------------------------------------------------
 
     # Dibuja un overlay semitransparente sobre toda la pantalla
     def _overlay(self, W: int, H: int, alpha: int):

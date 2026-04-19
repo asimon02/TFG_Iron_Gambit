@@ -1,5 +1,5 @@
 """
-board_renderer.py — Dibuja el tablero: casillas, highlights, piezas y coordenadas
+board_renderer.py -- Dibuja el tablero: casillas, highlights, piezas y coordenadas
 """
 
 import pygame
@@ -22,15 +22,32 @@ class BoardRenderer:
       - Coordenadas (letras de columna y numeros de fila)
     """
 
-    # Constructor que recibe la superficie de dibujo, el gestor de fuentes y el layout para calcular posiciones y tamaños
+    # Constructor que recibe la superficie de dibujo, el gestor de fuentes y el layout
     def __init__(self, surface: pygame.Surface,
                  fonts: FontManager, layout: Layout):
         self.surface = surface
         self.fonts   = fonts
         self.layout  = layout
         self._hl     = self._make_hl_surface()
+        self._crown_win  = None
+        self._crown_lose = None
 
-    # ── Actualizacion de layout ───────────────────────────────────────────────
+        # Drag & drop
+        self._drag_piece  = None
+        self._drag_color  = None
+        self._drag_sq     = None
+        self._drag_pos    = (0, 0)
+
+        # Animacion de movimiento de pieza
+        self._anim_piece  = None
+        self._anim_color  = None
+        self._anim_from   = None
+        self._anim_to     = None
+        self._anim_start  = 0
+        self._anim_dur    = 250
+        self._anim_sq_hide = None
+
+    # -- Actualizacion de layout ----------------------------------------------
 
     # Actualiza el layout y regenera las superficies de highlights
     def update_layout(self, layout: Layout):
@@ -42,7 +59,7 @@ class BoardRenderer:
         sq = self.layout.sq
         return pygame.Surface((sq, sq), pygame.SRCALPHA)
 
-    # ── Conversion de coordenadas ─────────────────────────────────────────────
+    # -- Conversion de coordenadas --------------------------------------------
 
     # Convierte una casilla de ajedrez (0-63) a coordenadas de pixel (x, y)
     def sq_to_px(self, sq: chess.Square, flipped: bool) -> tuple:
@@ -61,15 +78,92 @@ class BoardRenderer:
             return None
         return chess.square(cx, 7 - cy) if not flipped else chess.square(7 - cx, cy)
 
-    # ── Dibujo principal ──────────────────────────────────────────────────────
+    # -- Dibujo principal -----------------------------------------------------
 
     # Dibuja el tablero completo: casillas, piezas, highlights y coordenadas
     def draw(self, gs: GameState):
         self._draw_squares(gs)
         self._draw_pieces(gs)
+        self._draw_anim()
         self._draw_coords(gs.flipped)
+        # La pieza arrastrada se dibuja encima de todo
+        self._draw_drag()
+        # Mostrar coronas si hubo jaque mate, incluso tras cerrar el modal
+        if getattr(gs, 'checkmate_winner', None) is not None:
+            self._draw_checkmate_crowns(gs)
 
-    # ── Casillas y highlights ─────────────────────────────────────────────────
+    # -- Drag & drop ----------------------------------------------------------
+
+    # Inicia el arrastre de la pieza en la casilla sq
+    def start_drag(self, gs: GameState, sq: chess.Square, mouse_pos: tuple):
+        piece = gs.board.piece_at(sq)
+        if piece is None:
+            return
+        self._drag_piece = Theme.PIECES[piece.symbol()]
+        self._drag_color = Theme.PIECE_WHITE if piece.color == chess.WHITE else Theme.PIECE_BLACK
+        self._drag_sq    = sq
+        self._drag_pos   = mouse_pos
+
+    # Actualiza la posicion del arrastre
+    def update_drag(self, mouse_pos: tuple):
+        self._drag_pos = mouse_pos
+
+    # Termina el arrastre y devuelve la casilla origen, o None
+    def end_drag(self):
+        sq = self._drag_sq
+        self._drag_piece = None
+        self._drag_sq    = None
+        return sq
+
+    def is_dragging(self) -> bool:
+        return self._drag_sq is not None
+
+    # Dibuja la pieza siendo arrastrada centrada en el cursor
+    def _draw_drag(self):
+        if not self.is_dragging():
+            return
+        L  = self.layout
+        f  = self.fonts.piece
+        mx, my = self._drag_pos
+
+        # Sombra
+        shadow = f.render(self._drag_piece, True, (30, 30, 35))
+        sx = mx - shadow.get_width()  // 2
+        sy = my - shadow.get_height() // 2
+        offset = max(1, L.sq // 42)
+        self.surface.blit(shadow, (sx + offset, sy + offset))
+        
+        # Pieza
+        psurf = f.render(self._drag_piece, True, self._drag_color)
+        self.surface.blit(psurf, (mx - psurf.get_width() // 2,
+                                   my - psurf.get_height() // 2))
+
+    # Comprueba si hay una animacion en curso
+    def is_animating(self) -> bool:
+        if self._anim_piece is None:
+            return False
+        return pygame.time.get_ticks() < self._anim_start + self._anim_dur
+
+    # Limpia la animacion
+    def clear_anim(self):
+        self._anim_piece   = None
+        self._anim_sq_hide = None
+        self._anim_from    = None
+        self._anim_to      = None
+
+    # Inicia la animacion de movimiento para el move dado
+    def start_anim(self, gs: GameState, move: chess.Move):
+        piece = gs.board.piece_at(move.from_square)
+        if piece is None:
+            return
+        self._anim_piece   = Theme.PIECES[piece.symbol()]
+        self._anim_color   = Theme.PIECE_WHITE if piece.color == chess.WHITE else Theme.PIECE_BLACK
+        self._anim_from    = self.sq_to_px(move.from_square, gs.flipped)
+        self._anim_to      = self.sq_to_px(move.to_square,   gs.flipped)
+        self._anim_start   = pygame.time.get_ticks()
+        self._anim_sq_hide = move.from_square
+
+    # -- Casillas y highlights ------------------------------------------------
 
     # Dibuja las casillas del tablero con sus colores base y highlights de seleccion
     def _draw_squares(self, gs: GameState):
@@ -120,14 +214,19 @@ class BoardRenderer:
                     pygame.draw.circle(dot, Theme.HL_MOVE, (L.sq // 2, L.sq // 2), rad)
                     self.surface.blit(dot, (x, y))
 
-    # ── Piezas ────────────────────────────────────────────────────────────────
+    # -- Piezas ---------------------------------------------------------------
 
-    # Dibuja las piezas en sus casillas usando caracteres unicode con sombra para profundidad
+    # Dibuja las piezas en sus casillas usando caracteres unicode con sombra
     def _draw_pieces(self, gs: GameState):
         L = self.layout
         f = self.fonts.piece
 
         for sq in chess.SQUARES:
+            # Ocultar la pieza que esta siendo animada o arrastrada
+            if sq == self._anim_sq_hide and self.is_animating():
+                continue
+            if sq == self._drag_sq and self.is_dragging():
+                continue
             piece = gs.board.piece_at(sq)
             if not piece:
                 continue
@@ -151,9 +250,38 @@ class BoardRenderer:
             psurf = f.render(sym, True, piece_color)
             self.surface.blit(psurf, (cx, cy))
 
-    # ── Marco del tablero ─────────────────────────────────────────────────────
+    # Dibuja la pieza animada interpolando su posicion entre origen y destino
+    def _draw_anim(self):
+        if self._anim_piece is None:
+            return
+        now     = pygame.time.get_ticks()
+        elapsed = now - self._anim_start
+        if elapsed >= self._anim_dur:
+            return
 
-    # Dibuja un marco dorado y carmesi alrededor del tablero para enmarcarlo visualmente
+        # Interpolacion lineal suave (ease-out cuadratico)
+        t  = elapsed / self._anim_dur
+        t  = 1 - (1 - t) ** 2
+        fx, fy = self._anim_from
+        tx, ty = self._anim_to
+        cx = int(fx + (tx - fx) * t)
+        cy = int(fy + (ty - fy) * t)
+
+        L  = self.layout
+        f  = self.fonts.piece
+        # Sombra
+        shadow = f.render(self._anim_piece, True, (30, 30, 35))
+        sx = cx + L.sq // 2 - shadow.get_width()  // 2
+        sy = cy + L.sq // 2 - shadow.get_height() // 2
+        offset = max(1, L.sq // 42)
+        self.surface.blit(shadow, (sx + offset, sy + offset))
+        # Pieza
+        psurf = f.render(self._anim_piece, True, self._anim_color)
+        self.surface.blit(psurf, (sx, sy))
+
+    # -- Marco del tablero ----------------------------------------------------
+
+    # Dibuja un marco dorado y carmesi alrededor del tablero
     def _draw_border(self):
         L = self.layout
         pygame.draw.rect(self.surface, Theme.GOLD,
@@ -161,7 +289,66 @@ class BoardRenderer:
         pygame.draw.rect(self.surface, Theme.CRIMSON,
                          (L.bx - 6, L.by - 6, L.board_px + 12, L.board_px + 12), 1)
 
-    # ── Coordenadas ───────────────────────────────────────────────────────────
+    # -- Jaque mate -----------------------------------------------------------
+
+    # Carga las imagenes de corona si aun no estan cargadas
+    def _load_crowns(self):
+        import os
+        if self._crown_win is not None:
+            return
+        base = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(base, "images", "crown_win.png"),
+            "images/crown_win.png",
+        ]
+        for path in candidates:
+            try:
+                self._crown_win  = pygame.image.load(path).convert()
+                lose_path = path.replace("crown_win", "crown_lose")
+                self._crown_lose = pygame.image.load(lose_path).convert()
+                print(f"[crown] Cargadas desde: {path}")
+                return
+            except Exception:
+                continue
+        
+        # No se encontro ninguna
+        print("[crown] No se encontraron imagenes de corona. Rutas probadas:")
+        for p in candidates:
+            print(f"  {p}")
+        self._crown_win  = False
+        self._crown_lose = False
+
+    # Dibuja iconos de corona sobre el rey ganador y el rey perdedor
+    def _draw_checkmate_crowns(self, gs: GameState):
+        self._load_crowns()
+        L = self.layout
+
+        winner_color = gs.checkmate_winner
+        loser_color  = not winner_color
+
+        icon_sz = max(16, L.sq // 3)
+
+        for color, is_winner in [(winner_color, True), (loser_color, False)]:
+            king_sq = gs.board.king(color)
+            if king_sq is None:
+                continue
+            kx, ky = self.sq_to_px(king_sq, gs.flipped)
+
+            img = self._crown_win if is_winner else self._crown_lose
+            if img is not False and img is not None:
+                scaled = pygame.transform.smoothscale(img, (icon_sz, icon_sz))
+                self.surface.blit(scaled, (kx + 2, ky + 2))
+            else:
+                # Fallback visible: cuadrado de color con letra
+                bg = (210, 170, 20) if is_winner else (180, 30, 30)
+                pygame.draw.rect(self.surface, bg,
+                                 (kx + 2, ky + 2, icon_sz, icon_sz), border_radius=3)
+                ff = pygame.font.SysFont("Segoe UI Symbol", max(10, icon_sz - 4))
+                cs = ff.render("\u265a", True, (200, 200, 205))
+                self.surface.blit(cs, (kx + 2 + (icon_sz - cs.get_width()) // 2,
+                                       ky + 2 + (icon_sz - cs.get_height()) // 2))
+
+    # -- Coordenadas ----------------------------------------------------------
 
     # Dibuja las coordenadas de archivos (a-h) y filas (1-8) alrededor del tablero
     def _draw_coords(self, flipped: bool):

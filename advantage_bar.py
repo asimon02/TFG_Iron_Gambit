@@ -1,5 +1,5 @@
 """
-advantage_bar.py — Barra lateral de ventaja de material
+advantage_bar.py -- Barra lateral de ventaja de material
 
 Dibuja una barra vertical a la izquierda del tablero:
   - Mitad superior: color de las negras
@@ -9,7 +9,7 @@ Dibuja una barra vertical a la izquierda del tablero:
 La barra tiene animacion suave: el valor real se interpola hacia el
 valor objetivo en cada frame para que el cambio no sea brusco
 
-Valores de material estandar: P=1 N=3 B=3 R=5 Q=9 → maximo = 39
+Valores de material estandar: P=1 N=3 B=3 R=5 Q=9 -- maximo = 39
 """
 
 import pygame
@@ -59,7 +59,7 @@ class AdvantageBar:
 
         # Zona negra (parte superior)
         black_h = int(h * (1.0 - self._display_frac))
-        
+
         # Zona blanca (parte inferior)
         white_h = h - black_h
 
@@ -101,6 +101,6 @@ class AdvantageBar:
 
         lx = x + (w - lw) // 2
 
-        # Fondo pequeño para legibilidad
+        # Fondo pequeno para legibilidad
         pygame.draw.rect(self.surface, bg, (lx - 1, ly - 1, lw + 2, lh + 2))
         self.surface.blit(label, (lx, ly))

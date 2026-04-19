@@ -1,5 +1,5 @@
 """
-font_manager.py — Carga y escalado de fuentes del sistema
+font_manager.py -- Carga y escalado de fuentes del sistema
 
 Las fuentes se escalan proporcionalmente al ancho del panel y al tamaño
 de la casilla del tablero, garantizando legibilidad en cualquier resolucion
@@ -20,14 +20,16 @@ class FontManager:
 
     Fuentes disponibles
     -------------------
-    title    — titulo "IRON GAMBIT"
-    heading  — encabezados de seccion
-    body     — texto normal del panel
-    small    — etiquetas secundarias y subtitulos
-    mono     — historial de movimientos en notacion SAN
-    key      — etiquetas de teclas de control
-    coord    — letras y numeros del tablero
-    piece    — simbolos unicode de las piezas
+    title     -- titulo "IRON GAMBIT"
+    heading   -- encabezados de seccion
+    body      -- texto normal del panel
+    small     -- etiquetas secundarias y subtitulos
+    mono      -- historial de movimientos en notacion SAN (legado)
+    hist_move -- texto de movimientos en la tabla de historial
+    hist_icon -- iconos unicode de pieza dentro de las filas del historial
+    key       -- etiquetas de teclas de control
+    coord     -- letras y numeros del tablero
+    piece     -- simbolos unicode de las piezas
     """
 
     # Inicializa pygame.font y carga las fuentes segun el layout actual
@@ -47,11 +49,13 @@ class FontManager:
         def sz(base: int) -> int:
             return max(9, int(base * scale))
 
-        self.title   = pygame.font.SysFont(_FONT_TITLE, sz(26), bold=True)
-        self.heading = pygame.font.SysFont(_FONT_BODY,  sz(13), bold=True)
-        self.body    = pygame.font.SysFont(_FONT_BODY,  sz(12))
-        self.small   = pygame.font.SysFont(_FONT_BODY,  sz(10))
-        self.mono    = pygame.font.SysFont(_FONT_MONO,  sz(11))
-        self.key     = pygame.font.SysFont(_FONT_BODY,  sz(10), bold=True)
-        self.coord   = pygame.font.SysFont(_FONT_BODY,  max(9, layout.sq // 6), bold=True)
-        self.piece   = pygame.font.SysFont(_FONT_PIECE, max(18, int(layout.sq * 0.70)))
+        self.title     = pygame.font.SysFont(_FONT_TITLE,  sz(26), bold=True)
+        self.heading   = pygame.font.SysFont(_FONT_BODY,   sz(13), bold=True)
+        self.body      = pygame.font.SysFont(_FONT_BODY,   sz(12))
+        self.small     = pygame.font.SysFont(_FONT_BODY,   sz(10))
+        self.mono      = pygame.font.SysFont(_FONT_MONO,   sz(11))
+        self.hist_move = pygame.font.SysFont(_FONT_BODY,   sz(11))
+        self.hist_icon = pygame.font.SysFont(_FONT_PIECE,  sz(12))
+        self.key       = pygame.font.SysFont(_FONT_BODY,   sz(10), bold=True)
+        self.coord     = pygame.font.SysFont(_FONT_BODY,   max(9, layout.sq // 6), bold=True)
+        self.piece     = pygame.font.SysFont(_FONT_PIECE,  max(18, int(layout.sq * 0.70)))

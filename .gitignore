@@ -1,0 +1,61 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales
+venv/
+env/
+.venv/
+
+# =========================
+# Archivos del sistema
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# IDEs / Editores
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =========================
+# Logs y temporales
+# =========================
+*.log
+*.tmp
+
+# =========================
+# Archivos generados
+# =========================
+*.out
+*.exe
+
+# =========================
+# Stockfish
+# =========================
+stockfish/
+
+# =========================
+# Archivos de datos locales
+# =========================
+data/
+*.db
+*.sqlite3
+
+# =========================
+# Build / distribución
+# =========================
+build/
+dist/
+*.egg-info/
+
+# =========================
+# Jupyter (por si acaso)
+# =========================
+.ipynb_checkpoints/
