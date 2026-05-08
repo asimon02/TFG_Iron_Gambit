@@ -4,8 +4,9 @@ engine.py -- Wrapper sobre motores de ajedrez UCI (Stockfish)
 Gestiona la comunicacion con el ejecutable del motor, el nivel de dificultad
 y el calculo del mejor movimiento para una posicion dada
 
-Cada nivel combina tres parametros de Stockfish para una dificultad real:
-  - Skill Level (0-20): controla la calidad de la busqueda
+Cada nivel combina parametros de Stockfish para una dificultad real:
+  - UCI_LimitStrength y UCI_Elo: para emular errores humanos (versiones modernas)
+  - Skill Level (0-20): controla la calidad de la busqueda (versiones antiguas o nivel Max)
   - Depth:              limita la profundidad de analisis
   - Time:               tiempo maximo de calculo en segundos
 """
@@ -13,14 +14,37 @@ Cada nivel combina tres parametros de Stockfish para una dificultad real:
 import chess
 import chess.engine
 
-# Niveles de dificultad: nombre -> (Skill Level, depth, tiempo segundos)
+# Diccionario con la configuración completa por nivel:
+# Nombre -> {"uci_limit": bool, "uci_elo": int, "skill": int, "depth": int, "time": float}
 LEVELS = {
-    "Principiante": (0,  1, 0.05),
-    "Facil":        (3,  2, 0.1 ),
-    "Normal":       (8,  5, 0.3 ),
-    "Dificil":      (14, 8, 0.8 ),
-    "Experto":      (18, 12, 1.5),
-    "Maestro":      (20, 20, 3.0),
+    "Principiante": {
+        "uci_limit": True,
+        "uci_elo": 800,
+        "skill": 0,
+        "depth": 2,
+        "time": 0.05
+    },
+    "Intermedio": {
+        "uci_limit": True,
+        "uci_elo": 1400,
+        "skill": 5,
+        "depth": 4,
+        "time": 0.2
+    },
+    "Avanzado": {
+        "uci_limit": True,
+        "uci_elo": 1800,
+        "skill": 10,
+        "depth": 8,
+        "time": 0.5
+    },
+    "Gran Maestro": {
+        "uci_limit": False,
+        "uci_elo": 2500,
+        "skill": 20,
+        "depth": 10,
+        "time": 1.5
+    }
 }
 LEVEL_NAMES = list(LEVELS.keys())
 
@@ -38,7 +62,7 @@ class Engine:
     # Inicializa el motor con el ejecutable dado
     def __init__(self, path: str = "stockfish/stockfish-windows-x86-64-avx2.exe"):
         self.name  = "Stockfish"
-        self.level = LEVEL_NAMES[2]
+        self.level = LEVEL_NAMES[1]
         self._path = path
         self._eng  = None
         self.ready = False
@@ -77,11 +101,18 @@ class Engine:
 
     # Aplica los parametros del nivel actual al motor, si esta listo
     def _apply_level(self):
-        skill, depth, _ = LEVELS[self.level]
+        config = LEVELS[self.level]
         try:
-            self._eng.configure({"Skill Level": skill})
-        except Exception:
-            pass
+            options = {
+                "UCI_LimitStrength": config["uci_limit"],
+                "Skill Level": config["skill"]
+            }
+            if config["uci_limit"]:
+                options["UCI_Elo"] = config["uci_elo"]
+                
+            self._eng.configure(options)
+        except Exception as e:
+            print(f"Error al configurar motor: {e}")
 
     # -- Calculo de movimiento ------------------------------------------------
 
@@ -89,11 +120,12 @@ class Engine:
     def best_move(self, board: chess.Board):
         if not self.ready or board.is_game_over():
             return None
-        skill, depth, time_limit = LEVELS[self.level]
+            
+        config = LEVELS[self.level]
         try:
             result = self._eng.play(
                 board,
-                chess.engine.Limit(depth=depth, time=time_limit),
+                chess.engine.Limit(depth=config["depth"], time=config["time"]),
             )
             return result.move
         except Exception:

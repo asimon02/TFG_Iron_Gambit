@@ -22,7 +22,6 @@ class GameState:
     legal_moves        : list[Move]   -- movimientos legales desde selected_sq
     flipped            : bool         -- tablero girado (negras abajo)
     promotion_pending  : chess.Move   -- movimiento pendiente de promocion
-    status             : str          -- mensaje de estado para la UI
     game_over          : bool
     game_over_msg      : str
     """
@@ -36,7 +35,6 @@ class GameState:
         self.legal_moves        = []
         self.flipped            = False
         self.promotion_pending  = None
-        self.status             = "Turno de las Blancas"
         self.game_over          = False
         self.game_over_msg      = ""
         self.checkmate_winner   = None
@@ -64,7 +62,6 @@ class GameState:
                 )
                 if is_promotion:
                     self.promotion_pending = chess.Move(self.selected_sq, sq)
-                    self.status = "Elige la pieza de promocion"
                     return
                 self._execute(move)
                 return
@@ -158,17 +155,8 @@ class GameState:
         self._deselect()
         self._check_end()
 
-    # Actualiza el mensaje de estado segun la posicion actual, incluyendo jaque y turnos
     def _refresh(self):
-        if self.game_over:
-            return
-        color = "Blancas" if self.board.turn == chess.WHITE else "Negras"
-        if self.board.is_check():
-            self.status = "JAQUE! - Turno de las " + color
-        elif self.selected_sq is not None:
-            self.status = "Elige destino (" + chess.square_name(self.selected_sq) + ")"
-        else:
-            self.status = "Turno de las " + color
+        return
 
     # Comprueba si la partida ha terminado por jaque mate, tablas o cualquier otra condicion
     def _check_end(self):
@@ -188,7 +176,6 @@ class GameState:
     def _end(self, msg: str):
         self.game_over     = True
         self.game_over_msg = msg
-        self.status        = msg
 
     # Calcula la ventaja material actual, sumando el valor de las piezas de cada bando
     def material_advantage(self) -> float:

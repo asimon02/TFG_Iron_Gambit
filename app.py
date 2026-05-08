@@ -10,11 +10,15 @@ La clase App es el punto de entrada de la aplicacion. Gestiona:
   - Propagacion de cambios de layout a todos los renderers
 """
 
-import sys
 import random
 import threading
 import pygame
+import queue
+from typing import Optional
+import chess
 
+from hr_monitor     import HeartRateMonitor
+from adaptation_engine import AdaptationEngine
 from advantage_bar  import AdvantageBar
 from layout         import Layout
 from font_manager   import FontManager
@@ -24,7 +28,7 @@ from panel_renderer import PanelRenderer
 from modal_renderer import ModalRenderer
 from top_bar        import TopBar
 from side_selector  import SideSelector, SIDE_WHITE, SIDE_BLACK, SIDE_HUMAN
-from engine         import Engine, LEVEL_NAMES
+from engine         import Engine
 from theme          import Theme
 
 class App:
@@ -36,13 +40,14 @@ class App:
     Clic izquierdo  -- seleccionar / mover pieza
     N               -- nueva partida (abre selector de bando)
     Z               -- deshacer movimiento
-    F               -- rotar tablero
+    R               -- rotar tablero
     F11             -- pantalla completa / ventana
     Esc             -- cerrar desplegable / salir de pantalla completa / salir
     """
 
     TITLE = "Iron Gambit"
     FPS   = 120
+    INITIAL_TIME_SECONDS = 5 * 60
 
     def __init__(self):
         pygame.init()
@@ -58,6 +63,8 @@ class App:
             (Layout.BASE_W, Layout.BASE_H), pygame.RESIZABLE)
         pygame.display.set_caption(self.TITLE)
         self._clock = pygame.time.Clock()
+        self._running = True
+        self._cleanup_done = False
 
         # Motor UCI
         self._engine      = Engine("stockfish/stockfish-windows-x86-64-avx2.exe")
@@ -74,7 +81,12 @@ class App:
         self._panel    = PanelRenderer(self._screen, self._fonts, self._layout)
         self._modal    = ModalRenderer(self._screen, self._fonts, self._layout)
         self._adv_bar  = AdvantageBar(self._screen, self._layout)
-        self._top_bar  = TopBar(self._screen, self._engine.name, self._engine.level)
+        self._top_bar  = TopBar(
+            self._screen,
+            self._engine.name,
+            self._engine.level,
+            self.INITIAL_TIME_SECONDS,
+        )
         self._selector = SideSelector(self._screen, self._fonts, self._layout)
 
         # Retraso aleatorio del motor (ms)
@@ -90,19 +102,60 @@ class App:
         self._drag_candidate_sq   = None
         self._drag_active         = False
 
+        # Monitor de Frecuencia Cardiaca
+        self._hr_queue = queue.Queue()
+        self._hr_monitor = HeartRateMonitor(data_queue=self._hr_queue)
+        self._hr_monitor.start()
+        self._current_hr = None
+        self._adaptation_engine = AdaptationEngine()
+        self._hr_state = "normal"
+        self._average_hr = None
+        self._show_hr_stop = False
+        self._hr_threshold_zone = "normal"
+
         # Mostrar selector al arrancar
         self._selector.show()
 
         self._promo_rects  = []
         self._close_rect   = None
+        self._confirm_exit_active = False
+        self._confirm_yes_rect: Optional[pygame.Rect] = None
+        self._confirm_no_rect: Optional[pygame.Rect] = None
+        self._clock_times = {
+            chess.WHITE: float(self.INITIAL_TIME_SECONDS),
+            chess.BLACK: float(self.INITIAL_TIME_SECONDS),
+        }
+        self._last_frame_ms = pygame.time.get_ticks()
 
     # -- Bucle principal -------------------------------------------------------
 
     def run(self):
         try:
-            while True:
+            while self._running:
+                now_ms = pygame.time.get_ticks()
+                dt = max(0.0, (now_ms - self._last_frame_ms) / 1000.0)
+                self._last_frame_ms = now_ms
+
                 for event in pygame.event.get():
                     self._handle_event(event)
+
+                if not self._running:
+                    break
+
+                # Actualizar FC y aplicar efectos sobre la interfaz / reloj
+                try:
+                    while True:
+                        bpm = self._hr_queue.get_nowait()
+                        self._current_hr = bpm
+                        self._adaptation_engine.add_reading(bpm)
+                        self._average_hr = self._adaptation_engine.get_average_bpm()
+                        self._hr_state = self._adaptation_engine.get_hr_state(self._current_hr)
+                        self._show_hr_stop = (self._hr_state == "high")
+                        self._apply_hr_threshold_effect()
+                except queue.Empty:
+                    pass
+
+                self._update_chess_clock(dt)
 
                 # Disparar movimiento del motor si corresponde
                 self._maybe_engine_move()
@@ -113,7 +166,9 @@ class App:
                 pygame.display.flip()
                 self._clock.tick(self.FPS)
         except KeyboardInterrupt:
-            self._quit()
+            self._confirm_exit()
+        finally:
+            self._cleanup()
 
     # -- Motor -----------------------------------------------------------------
 
@@ -171,9 +226,12 @@ class App:
         def think():
             current_fen = self._gs.board.fen()
             move = self._engine.best_move(self._gs.board)
-            if move and not self._gs.game_over:
-                pygame.event.post(pygame.event.Event(
-                    pygame.USEREVENT, {"engine_move": move, "fen": current_fen}))
+            if move and not self._gs.game_over and self._running and pygame.get_init():
+                try:
+                    pygame.event.post(pygame.event.Event(
+                        pygame.USEREVENT, {"engine_move": move, "fen": current_fen}))
+                except pygame.error:
+                    pass
             self._engine_thinking = False
 
         threading.Thread(target=think, daemon=True).start()
@@ -182,12 +240,20 @@ class App:
 
     def _handle_event(self, event: pygame.event.Event):
         if event.type == pygame.QUIT:
-            self._quit()
+            self._request_exit_confirmation()
+            return
 
-        elif event.type == pygame.USEREVENT:
+        if self._confirm_exit_active:
+            if event.type == pygame.KEYDOWN:
+                self._handle_key(event.key)
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                self._handle_click(event.pos)
+            return
+
+        if event.type == pygame.USEREVENT:
             move = getattr(event, "engine_move", None)
             fen  = getattr(event, "fen", None)
-            if move and fen == self._gs.board.fen():
+            if move and not self._gs.game_over and fen == self._gs.board.fen():
                 delay = random.randint(self._ENGINE_DELAY_MIN, self._ENGINE_DELAY_MAX)
                 self._engine_move_ready = move
                 self._engine_move_at    = pygame.time.get_ticks() + delay
@@ -222,14 +288,24 @@ class App:
         # Procesar cambios en la barra superior
         if self._top_bar.level_changed:
             self._engine.set_level(self._top_bar.selected_level)
+        if self._top_bar.time_changed:
+            self.INITIAL_TIME_SECONDS = self._top_bar.selected_time_seconds
+            self._reset_chess_clock()
         self._top_bar.clear_flags()
 
     def _handle_key(self, key: int):
+        if self._confirm_exit_active:
+            if key in (pygame.K_ESCAPE, pygame.K_n):
+                self._cancel_exit_confirmation()
+            elif key in (pygame.K_RETURN, pygame.K_y, pygame.K_s):
+                self._confirm_exit()
+            return
+
         if key == pygame.K_ESCAPE:
             if self._fullscreen:
                 self._toggle_fullscreen()
             else:
-                self._quit()
+                self._request_exit_confirmation()
         elif key == pygame.K_F11:
             self._toggle_fullscreen()
         elif key == pygame.K_n:
@@ -245,11 +321,20 @@ class App:
                 self._engine_move_ready = None
                 self._pending_move      = None
                 self._board.clear_anim()
-        elif key == pygame.K_f:
+        elif key == pygame.K_r:
             self._gs.flipped = not self._gs.flipped
 
     def _handle_click(self, pos: tuple):
         mx, my = pos
+
+        if self._confirm_exit_active:
+            if self._confirm_yes_rect and self._confirm_yes_rect.collidepoint(mx, my):
+                self._confirm_exit()
+            elif self._confirm_no_rect and self._confirm_no_rect.collidepoint(mx, my):
+                self._cancel_exit_confirmation()
+            else:
+                self._cancel_exit_confirmation()
+            return
 
         # La barra superior consume el clic primero
         if self._top_bar.handle_click(pos):
@@ -332,8 +417,8 @@ class App:
         self._board.clear_anim()
         self._gs.reset()
         self._promo_rects = []
+        self._reset_chess_clock()
 
-        import chess
         self._gs.flipped = (side == SIDE_BLACK)
 
     # -- Renderizado ----------------------------------------------------------
@@ -342,10 +427,22 @@ class App:
         self._screen.fill(Theme.BG)
 
         # Barra superior (fondo y controles, sin desplegables abiertos)
-        self._top_bar.draw(self._engine.ready)
+        self._top_bar.draw(
+            self._engine.ready,
+            self._current_hr,
+            self._average_hr,
+            self._hr_state,
+            self._show_hr_stop,
+        )
         self._adv_bar.draw(self._gs)
         self._board.draw(self._gs)
-        self._panel.draw(self._gs)
+        self._panel.draw(
+            self._gs,
+            self._clock_times,
+            self._gs.board.turn,
+            self._format_clock(self._clock_times[chess.WHITE]),
+            self._format_clock(self._clock_times[chess.BLACK]),
+        )
 
         if self._gs.promotion_pending:
             self._promo_rects = self._modal.draw_promotion(
@@ -363,6 +460,9 @@ class App:
 
         # Desplegables de la barra superior AL FINAL para quedar sobre todo
         self._top_bar.draw_overlays()
+
+        if self._confirm_exit_active:
+            self._confirm_yes_rect, self._confirm_no_rect = self._modal.draw_exit_confirmation()
 
     # Muestra un pequeno indicador de que el motor esta pensando
     def _draw_thinking(self):
@@ -400,7 +500,94 @@ class App:
                   self._adv_bar, self._top_bar, self._selector):
             r.surface = self._screen
 
-    @staticmethod
-    def _quit():
-        pygame.quit()
-        sys.exit()
+    def _request_exit_confirmation(self):
+        self._confirm_exit_active = True
+        self._confirm_yes_rect = None
+        self._confirm_no_rect = None
+
+    def _cancel_exit_confirmation(self):
+        self._confirm_exit_active = False
+        self._confirm_yes_rect = None
+        self._confirm_no_rect = None
+
+    def _confirm_exit(self):
+        self._running = False
+        self._confirm_exit_active = False
+
+    def _cleanup(self):
+        if self._cleanup_done:
+            return
+
+        self._cleanup_done = True
+        self._confirm_exit_active = False
+        self._engine_move_ready = None
+        self._pending_move = None
+        self._engine_thinking = False
+
+        if hasattr(self, "_hr_monitor") and self._hr_monitor:
+            self._hr_monitor.stop()
+
+        if hasattr(self, "_engine") and self._engine:
+            self._engine.close()
+
+        if pygame.get_init():
+            pygame.quit()
+
+    def _reset_chess_clock(self):
+        self._clock_times[chess.WHITE] = float(self.INITIAL_TIME_SECONDS)
+        self._clock_times[chess.BLACK] = float(self.INITIAL_TIME_SECONDS)
+        self._last_frame_ms = pygame.time.get_ticks()
+
+    def _apply_hr_threshold_effect(self):
+        zone = self._hr_state
+        if zone == "normal":
+            self._hr_threshold_zone = "normal"
+            return
+
+        if zone == self._hr_threshold_zone:
+            return
+
+        if zone == "low":
+            self._adjust_human_clock(-10.0)
+        elif zone == "high":
+            self._adjust_human_clock(10.0)
+
+        self._hr_threshold_zone = zone
+
+    def _adjust_human_clock(self, delta_seconds: float):
+        target_color = None
+        if self._human_side == SIDE_WHITE:
+            target_color = chess.WHITE
+        elif self._human_side == SIDE_BLACK:
+            target_color = chess.BLACK
+
+        if target_color is None:
+            return
+
+        self._clock_times[target_color] = max(
+            0.0,
+            self._clock_times[target_color] + delta_seconds,
+        )
+
+    def _update_chess_clock(self, dt: float):
+        if dt <= 0.0 or self._gs.game_over or self._selector.active or self._confirm_exit_active:
+            return
+
+        active_color = self._gs.board.turn
+        self._clock_times[active_color] = max(0.0, self._clock_times[active_color] - dt)
+
+        if self._clock_times[active_color] <= 0.0:
+            winner = "Negras" if active_color == chess.WHITE else "Blancas"
+            self._gs.game_over = True
+            self._gs.game_over_msg = f"Tiempo agotado - Ganan las {winner}"
+            self._gs.checkmate_winner = None
+            self._engine_move_ready = None
+            self._engine_move_at = None
+            self._pending_move = None
+            self._engine_thinking = False
+
+    def _format_clock(self, remaining_seconds: float) -> str:
+        total = max(0, int(remaining_seconds))
+        minutes = total // 60
+        seconds = total % 60
+        return f"{minutes:02d}:{seconds:02d}"
