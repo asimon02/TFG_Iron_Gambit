@@ -1,0 +1,4 @@
+chess
+pygame
+bleak
+opencv-python
