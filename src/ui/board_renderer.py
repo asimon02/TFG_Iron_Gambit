@@ -112,7 +112,7 @@ class BoardRenderer:
             pygame.draw.rect(self.surface, (210, 60, 60), (cx, cy, card_w, card_h), 2, border_radius=8)  # Borde rojo carmesí
             
             # Texto principal "STOP"
-            font_stop = pygame.font.SysFont("Impact", max(36, card_h // 3), bold=True)
+            font_stop = pygame.font.SysFont("Segoe UI", max(36, card_h // 3), bold=True)
             stop_surf = font_stop.render("STOP", True, (230, 50, 50))
             
             # Texto secundario

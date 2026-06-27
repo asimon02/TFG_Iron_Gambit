@@ -65,6 +65,7 @@ class SettingsView:
         self._upper_hr_rects: list[tuple[pygame.Rect, int]] = []
         self._time_mode_rects: list[tuple[pygame.Rect, str]] = []
         self._increment_rects: list[tuple[pygame.Rect, int]] = []
+        self._hr_player_rects: list[tuple[pygame.Rect, str]] = []
 
         self.LOWER_HR_OPTIONS = [60, 70, 80, 90]
         self.UPPER_HR_OPTIONS = [90, 100, 110, 120]
@@ -74,6 +75,7 @@ class SettingsView:
         self._low_penalty_rects: list[tuple[pygame.Rect, int]] = []
         self.LOW_PENALTY_OPTIONS = [2, 3, 5, 10]
         self.selected_low_penalty = current_settings.get("low_penalty", 10)
+        self.selected_hr_player = current_settings.get("hr_player", "white")
         self.selected_design = current_settings.get("design", "Kingambit")
 
         self.active_tab = "ajustes"
@@ -110,6 +112,7 @@ class SettingsView:
         self.selected_time_mode      = current_settings.get("time_mode", self.selected_time_mode)
         self.selected_time_increment = current_settings.get("time_increment", self.selected_time_increment)
         self.selected_low_penalty    = current_settings.get("low_penalty", self.selected_low_penalty)
+        self.selected_hr_player      = current_settings.get("hr_player", self.selected_hr_player)
         self.selected_design         = current_settings.get("design", self.selected_design)
 
     def handle_click(self, pos: tuple) -> Optional[dict]:
@@ -194,6 +197,14 @@ class SettingsView:
                         return {"low_penalty": val}
                     return None
 
+            # Opciones de Portador del Pulsómetro
+            for rect, val in self._hr_player_rects:
+                if rect.collidepoint(mx, my):
+                    if val != self.selected_hr_player:
+                        self.selected_hr_player = val
+                        return {"hr_player": val}
+                    return None
+
         elif self.active_tab == "personalizacion":
             # Opciones de diseño
             for rect, name in self._design_rects:
@@ -232,6 +243,7 @@ class SettingsView:
         self._time_mode_rects = []
         self._increment_rects = []
         self._low_penalty_rects = []
+        self._hr_player_rects = []
         self._design_rects = []
 
         # --- Fondo completo ---
@@ -333,6 +345,11 @@ class SettingsView:
             low_penalty_y = cy
             cy += 20 + self._OPTION_H
             
+            # Subsección: Portador del Pulsómetro
+            cy += 16
+            hr_player_y = cy
+            cy += 20 + self._OPTION_H
+            
             cy += self._CARD_PAD // 2
             hr_card_h = cy - hr_card_top + self._CARD_PAD
             cy = hr_card_top + hr_card_h
@@ -408,7 +425,7 @@ class SettingsView:
             # Opciones de Incremento de Tiempo (solo activas si el modo es "Incremento")
             increment_enabled = (self.selected_time_mode == "Incremento")
             self._draw_horizontal_options_generic(
-                "Incremento por Jugada (Segundos):",
+                "Incremento por Jugada:",
                 [1, 2, 3, 5, 10],
                 self.selected_time_increment,
                 increment_y,
@@ -426,7 +443,7 @@ class SettingsView:
 
             # Opciones de Pulsación Inferior
             self._draw_horizontal_options(
-                "Pulsación Inferior (Mínimo / Relajación):",
+                "Pulsación Inferior:",
                 self.LOWER_HR_OPTIONS,
                 self.selected_lower_hr,
                 lower_hr_y,
@@ -439,7 +456,7 @@ class SettingsView:
 
             # Opciones de Pulsación Superior
             self._draw_horizontal_options(
-                "Pulsación Superior (Máximo / Estrés):",
+                "Pulsación Superior:",
                 self.UPPER_HR_OPTIONS,
                 self.selected_upper_hr,
                 upper_hr_y,
@@ -462,6 +479,20 @@ class SettingsView:
                 my,
                 self._low_penalty_rects,
                 lambda v: f"-{v} s"
+            )
+
+            # Opciones de Portador del Pulsómetro
+            self._draw_horizontal_options_generic(
+                "Portador del Pulsómetro:",
+                ["white", "black"],
+                self.selected_hr_player,
+                hr_player_y,
+                card_x,
+                card_max_w,
+                mx,
+                my,
+                self._hr_player_rects,
+                lambda v: "Blancas" if v == "white" else "Negras"
             )
 
         elif self.active_tab == "personalizacion":

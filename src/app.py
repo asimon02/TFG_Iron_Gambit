@@ -120,6 +120,7 @@ class App:
         self._show_hr_stop = False
         self._hr_threshold_zone = "normal"
         self._low_penalty_seconds = 10
+        self._hr_player = "white"
         self._design = "Kingambit"
         Theme.apply_design(self._design)
 
@@ -637,6 +638,11 @@ class App:
 
         self._gs.flipped = (side == SIDE_BLACK)
 
+        if side == SIDE_WHITE:
+            self._hr_player = "white"
+        elif side == SIDE_BLACK:
+            self._hr_player = "black"
+
     # -- Ajustes ---------------------------------------------------------------
 
     def _current_settings_dict(self) -> dict:
@@ -651,6 +657,7 @@ class App:
             "time_mode":    self._time_mode,
             "time_increment": self._time_increment_seconds,
             "low_penalty":   self._low_penalty_seconds,
+            "hr_player":     self._hr_player,
             "design":        self._design,
         }
 
@@ -697,6 +704,9 @@ class App:
 
         if "low_penalty" in change:
             self._low_penalty_seconds = change["low_penalty"]
+
+        if "hr_player" in change:
+            self._hr_player = change["hr_player"]
 
         if "design" in change:
             self._design = change["design"]
@@ -856,14 +866,7 @@ class App:
         self._hr_threshold_zone = zone
 
     def _adjust_human_clock(self, delta_seconds: float):
-        target_color = None
-        if self._human_side == SIDE_WHITE:
-            target_color = chess.WHITE
-        elif self._human_side == SIDE_BLACK:
-            target_color = chess.BLACK
-
-        if target_color is None:
-            return
+        target_color = chess.WHITE if self._hr_player == "white" else chess.BLACK
 
         self._clock_times[target_color] = max(
             0.0,
@@ -924,7 +927,7 @@ class App:
         file_path = os.path.join(desktop_path, "iron_gambit_frecuencia_cardiaca.csv")
         try:
             with open(file_path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
+                writer = csv.writer(f, delimiter=";")
                 writer.writerow(["Tiempo (s)", "Frecuencia Cardiaca (BPM)"])
                 for t, bpm in self._hr_history:
                     writer.writerow([f"{t:.2f}", bpm])

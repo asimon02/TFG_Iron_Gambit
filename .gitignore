@@ -34,7 +34,7 @@ Thumbs.db
 # Archivos generados
 # =========================
 *.out
-*.exe
+*.bat
 
 # =========================
 # Stockfish
