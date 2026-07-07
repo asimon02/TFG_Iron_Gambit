@@ -134,11 +134,10 @@ class HeartRateMonitor:
             if self.POLAR_MANUFACTURER_ID in advertisement_data.manufacturer_data:
                 payload = advertisement_data.manufacturer_data[self.POLAR_MANUFACTURER_ID]
                 
-                # El HR en BPM esta en el ultimo byte del payload (indice -1)
                 if len(payload) >= 13:
                     bpm = payload[-1]
                     
-                    if bpm > 0 and bpm != self._last_bpm:
+                    if bpm > 0:
                         self._last_bpm = bpm
                         self._emit_data(bpm)
 

@@ -16,8 +16,11 @@ from theme  import Theme
 # Opciones de tiempo (exportadas para settings_view)
 TIME_OPTIONS = [
     ("1 min", 60),
+    ("3 min", 3 * 60),
     ("5 min", 5 * 60),
     ("10 min", 10 * 60),
+    ("15 min", 15 * 60),
+    ("90 min", 90 * 60),
 ]
 
 BAR_H = 36

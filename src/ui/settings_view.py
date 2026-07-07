@@ -426,7 +426,7 @@ class SettingsView:
             increment_enabled = (self.selected_time_mode == "Incremento")
             self._draw_horizontal_options_generic(
                 "Incremento por Jugada:",
-                [1, 2, 3, 5, 10],
+                [1, 2, 3, 5, 10, 30],
                 self.selected_time_increment,
                 increment_y,
                 card_x,

@@ -154,9 +154,10 @@ class App:
         self._confirm_exit_active = False
         self._confirm_yes_rect: Optional[pygame.Rect] = None
         self._confirm_no_rect: Optional[pygame.Rect] = None
+        inc = float(self._time_increment_seconds) if self._time_mode == "Incremento" else 0.0
         self._clock_times = {
-            chess.WHITE: float(self.INITIAL_TIME_SECONDS),
-            chess.BLACK: float(self.INITIAL_TIME_SECONDS),
+            chess.WHITE: float(self.INITIAL_TIME_SECONDS) + inc,
+            chess.BLACK: float(self.INITIAL_TIME_SECONDS) + inc,
         }
         self._last_frame_ms = pygame.time.get_ticks()
         self._game_over_modal_dismissed = False
@@ -372,20 +373,23 @@ class App:
                     self._pending_is_engine = True
             return
 
-        if not self._is_engine_turn() or self._engine_thinking:
+        if not self._is_engine_turn() or self._engine_thinking or self._pending_move is not None or self._board.is_animating():
             return
         self._engine_thinking = True
 
         def think():
             current_fen = self._gs.board.fen()
             move = self._engine.best_move(self._gs.board)
+            posted = False
             if move and not self._gs.game_over and self._running and pygame.get_init():
                 try:
                     pygame.event.post(pygame.event.Event(
                         pygame.USEREVENT, {"engine_move": move, "fen": current_fen}))
+                    posted = True
                 except pygame.error:
                     pass
-            self._engine_thinking = False
+            if not posted:
+                self._engine_thinking = False
 
         threading.Thread(target=think, daemon=True).start()
 
@@ -410,6 +414,7 @@ class App:
                 delay = random.randint(self._ENGINE_DELAY_MIN, self._ENGINE_DELAY_MAX)
                 self._engine_move_ready = move
                 self._engine_move_at    = pygame.time.get_ticks() + delay
+            self._engine_thinking = False
 
         elif event.type == pygame.VIDEORESIZE:
             self._resize(event.w, event.h)
@@ -470,9 +475,11 @@ class App:
         elif key == pygame.K_n:
             self._promo_rects = []
             self._engine_thinking = False
+            self._engine_move_ready = None
+            self._engine_move_at    = None
             self._selector.show()
         elif key in (pygame.K_z, pygame.K_BACKSPACE):
-            if not self._engine_thinking and not self._show_hr_stop:
+            if not self._engine_thinking and self._engine_move_ready is None and not self._show_hr_stop:
                 if self._gs.view_move_idx is None or self._gs.view_move_idx == len(self._gs.san_history) - 1:
                     self._gs.undo()
                     if self._is_engine_turn():
@@ -685,10 +692,11 @@ class App:
         if "level" in change:
             self._engine.set_level(change["level"])
 
+        reset_needed = False
         if "time_seconds" in change:
             self._time_label = change["time_label"]
             self.INITIAL_TIME_SECONDS = change["time_seconds"]
-            self._reset_chess_clock()
+            reset_needed = True
 
         if "lower_hr" in change:
             self._adaptation_engine.lower_limit = change["lower_hr"]
@@ -698,9 +706,14 @@ class App:
 
         if "time_mode" in change:
             self._time_mode = change["time_mode"]
+            reset_needed = True
 
         if "time_increment" in change:
             self._time_increment_seconds = change["time_increment"]
+            reset_needed = True
+
+        if reset_needed:
+            self._reset_chess_clock()
 
         if "low_penalty" in change:
             self._low_penalty_seconds = change["low_penalty"]
@@ -763,7 +776,7 @@ class App:
             self._selector.draw(pygame.mouse.get_pos())
 
         # Indicador "pensando..."
-        if self._engine_thinking:
+        if self._engine_thinking or self._engine_move_ready is not None:
             self._draw_thinking()
 
         # Desplegables de la barra superior AL FINAL para quedar sobre todo
@@ -772,14 +785,50 @@ class App:
         if self._confirm_exit_active:
             self._confirm_yes_rect, self._confirm_no_rect = self._modal.draw_exit_confirmation()
 
-    # Muestra un pequeno indicador de que el motor esta pensando
+    # Muestra un pequeno indicador de que el motor esta pensando (discreto y sin recuadro)
     def _draw_thinking(self):
-        f = pygame.font.SysFont("Tahoma", 11)
-        s = f.render("Motor pensando...", True, Theme.GOLD)
+        import math
+        ticks = pygame.time.get_ticks()
+        
         L = self._layout
-        x = L.px
-        y = L.py + L.ph + 4
-        self._screen.blit(s, (x, y))
+        bx = L.px
+        by = L.py + L.ph + 6
+        height = 20
+        
+        # Spinner rotatorio de 8 puntos
+        spinner_cx = bx + 8
+        spinner_cy = by + height // 2
+        radius = 5
+        num_dots = 8
+        speed = 0.007  # Velocidad de rotación
+        
+        for i in range(num_dots):
+            # Ángulo base del punto
+            angle = i * (2 * math.pi / num_dots) - (ticks * speed)
+            dx = int(radius * math.cos(angle))
+            dy = int(radius * math.sin(angle))
+            
+            # El brillo/estela depende de la posición en el tiempo
+            intensity = int(128 + 127 * math.sin(angle))
+            # Escalar el color dorado según la intensidad
+            dot_color = (
+                int(Theme.GOLD[0] * intensity / 255),
+                int(Theme.GOLD[1] * intensity / 255),
+                int(Theme.GOLD[2] * intensity / 255)
+            )
+            dot_r = 1 if intensity < 120 else 2
+            pygame.draw.circle(self._screen, dot_color, (spinner_cx + dx, spinner_cy + dy), dot_r)
+            
+        # Texto con elipsis animada
+        ellipsis = ["", ".", "..", "..."]
+        ell_idx = (ticks // 350) % 4
+        text_str = f"Motor pensando{ellipsis[ell_idx]}"
+        
+        # Renderizar texto usando la fuente precargada (pequeña)
+        text_surf = self._fonts.small.render(text_str, True, Theme.GOLD_LT)
+        text_x = bx + 22
+        text_y = by + (height - text_surf.get_height()) // 2
+        self._screen.blit(text_surf, (text_x, text_y))
 
     # -- Gestion de ventana --------------------------------------------------
 
@@ -844,8 +893,9 @@ class App:
             pygame.quit()
 
     def _reset_chess_clock(self):
-        self._clock_times[chess.WHITE] = float(self.INITIAL_TIME_SECONDS)
-        self._clock_times[chess.BLACK] = float(self.INITIAL_TIME_SECONDS)
+        inc = float(self._time_increment_seconds) if self._time_mode == "Incremento" else 0.0
+        self._clock_times[chess.WHITE] = float(self.INITIAL_TIME_SECONDS) + inc
+        self._clock_times[chess.BLACK] = float(self.INITIAL_TIME_SECONDS) + inc
         self._last_frame_ms = pygame.time.get_ticks()
         self._last_move_count = len(self._gs.board.move_stack)
 
